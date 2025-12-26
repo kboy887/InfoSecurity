@@ -1,0 +1,77 @@
+#include <iostream>
+#include <fstream>
+#include <vector>
+#include <string>
+
+#if __cplusplus >= 201703L
+    #include <filesystem>
+    namespace fs = std::filesystem;
+#elif defined(__cpp_lib_filesystem)
+    #include <filesystem>
+    namespace fs = std::filesystem;
+#elif defined(__cpp_lib_experimental_filesystem)
+    #include <experimental/filesystem>
+    namespace fs = std::experimental::filesystem;
+#else
+    #error "Filesystem library not available"
+#endif
+
+using namespace std;
+
+int main() {
+    const string dir1 = "dir1";
+    const string dir2 = "dir2";
+    
+    cout << "Creating two directories..." << endl;
+    
+    // Create two directories
+    fs::create_directories(dir1);
+    fs::create_directories(dir2);
+    cout << "Created: " << dir1 << " and " << dir2 << endl;
+    
+    // Create some files in dir1
+    vector<string> files = {"file1.txt", "file2.txt", "file3.txt"};
+    for (const string& filename : files) {
+        string filepath = dir1 + "/" + filename;
+        ofstream file(filepath);
+        file << "Content of " << filename << endl;
+        file.close();
+    }
+    cout << "Created files in " << dir1 << endl;
+    
+    // Move all files from dir1 to dir2 (not copy!)
+    cout << "Moving all files from " << dir1 << " to " << dir2 << "..." << endl;
+    for (const auto& entry : fs::directory_iterator(dir1)) {
+        if (entry.is_regular_file()) {
+            string filename = entry.path().filename().string();
+            fs::rename(dir1 + "/" + filename, dir2 + "/" + filename);
+            cout << "Moved: " << filename << endl;
+        }
+    }
+    
+    // Verify files were moved (not copied)
+    cout << "\nVerification:" << endl;
+    cout << "Files in " << dir2 << ":" << endl;
+    for (const auto& entry : fs::directory_iterator(dir2)) {
+        if (entry.is_regular_file()) {
+            cout << "  - " << entry.path().filename().string() << endl;
+        }
+    }
+    
+    cout << "\nFiles in " << dir1 << " (should be empty):" << endl;
+    bool empty = true;
+    for (const auto& entry : fs::directory_iterator(dir1)) {
+        if (entry.is_regular_file()) {
+            cout << "  - " << entry.path().filename().string() << endl;
+            empty = false;
+        }
+    }
+    if (empty) {
+        cout << "  (empty - files were moved, not copied)" << endl;
+    }
+    
+    // Tar command discovery
+    cout << "\nTo discover tar command, use: tar --help" << endl;
+    
+    return 0;
+}
