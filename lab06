@@ -1,0 +1,297 @@
+#!/bin/bash
+# Lab 6: Permissions in Linux
+# Task: Discover how to change file owner and group and how it affects file usage
+
+echo "=== Lab 6: Permissions in Linux ==="
+echo ""
+
+# Check if running as root/sudo (some operations require it)
+if [ "$EUID" -ne 0 ]; then 
+    echo "Note: Some operations require root/sudo privileges"
+    echo "Running what we can without root..."
+    echo ""
+fi
+
+# Create test files and directories
+echo "Step 1: Creating test files and directories"
+mkdir -p test_permissions
+cd test_permissions
+
+touch file1.txt file2.txt
+echo "Hello, this is file1.txt" > file1.txt
+echo "Hello, this is file2.txt" > file2.txt
+
+mkdir test_dir
+echo "Test file in directory" > test_dir/file_in_dir.txt
+
+echo "✓ Created test files and directory"
+echo ""
+
+# Show current permissions
+echo "Step 2: Viewing current file permissions"
+echo "Current user: $(whoami)"
+echo "Current group: $(id -gn)"
+echo ""
+echo "Files and their permissions:"
+ls -la
+echo ""
+
+# Explain permission notation
+echo "Step 3: Understanding permission notation"
+echo "Permission format: -rwxrwxrwx"
+echo "  Position 1: File type (- = file, d = directory, l = link)"
+echo "  Positions 2-4: Owner permissions (r = read, w = write, x = execute)"
+echo "  Positions 5-7: Group permissions"
+echo "  Positions 8-10: Others permissions"
+echo ""
+echo "Numeric values:"
+echo "  r (read) = 4"
+echo "  w (write) = 2"
+echo "  x (execute) = 1"
+echo "  Sum them up (e.g., rwx = 4+2+1 = 7)"
+echo ""
+
+# Change permissions using chmod
+echo "Step 4: Changing permissions using chmod"
+echo "Changing file1.txt to 755 (rwxr-xr-x):"
+chmod 755 file1.txt
+ls -l file1.txt
+echo ""
+
+echo "Changing file2.txt to 644 (rw-r--r--):"
+chmod 644 file2.txt
+ls -l file2.txt
+echo ""
+
+echo "Changing test_dir to 700 (rwx------):"
+chmod 700 test_dir
+ls -ld test_dir
+echo ""
+
+# Demonstrate file owner and group
+echo "Step 5: Viewing file owner and group"
+echo "Current owner and group information:"
+stat -c "%n: Owner=%U(%u) Group=%G(%g) Permissions=%a" file1.txt file2.txt test_dir
+echo ""
+
+# Changing file owner (requires root)
+echo "Step 6: Changing file owner using chown"
+if [ "$EUID" -eq 0 ]; then
+    # Create a test user if it doesn't exist
+    TEST_USER="testuser"
+    if ! id "$TEST_USER" &>/dev/null; then
+        echo "Creating test user: $TEST_USER"
+        useradd -m -s /bin/bash "$TEST_USER" 2>/dev/null || echo "User may already exist or cannot create"
+    fi
+    
+    if id "$TEST_USER" &>/dev/null; then
+        echo "Changing owner of file1.txt to $TEST_USER:"
+        chown "$TEST_USER" file1.txt
+        ls -l file1.txt
+        echo ""
+        
+        # Try to read file as original user (should fail)
+        echo "Trying to read file1.txt as $(whoami) (original user):"
+        if [ "$(stat -c '%U' file1.txt)" != "$(whoami)" ]; then
+            cat file1.txt 2>&1 || echo "Permission may be denied if we're not in the file's group and others don't have read"
+        fi
+        echo ""
+        
+        # Change back to original user
+        chown "$(whoami)" file1.txt
+        echo "Changed owner back to $(whoami)"
+        ls -l file1.txt
+    fi
+else
+    echo "Skipping chown demonstration (requires root/sudo)"
+    echo "To change owner: sudo chown username file1.txt"
+    echo "To change owner and group: sudo chown username:groupname file1.txt"
+fi
+echo ""
+
+# Changing file group
+echo "Step 7: Changing file group using chgrp"
+CURRENT_GROUP=$(id -gn)
+echo "Current group: $CURRENT_GROUP"
+
+if [ "$EUID" -eq 0 ]; then
+    # Try to create/use a test group
+    TEST_GROUP="testgroup"
+    if ! grep -q "^${TEST_GROUP}:" /etc/group; then
+        groupadd "$TEST_GROUP" 2>/dev/null || echo "Group may already exist or cannot create"
+    fi
+    
+    if grep -q "^${TEST_GROUP}:" /etc/group; then
+        echo "Changing group of file2.txt to $TEST_GROUP:"
+        chgrp "$TEST_GROUP" file2.txt
+        ls -l file2.txt
+        echo ""
+        
+        # Change back
+        chgrp "$CURRENT_GROUP" file2.txt
+        echo "Changed group back to $CURRENT_GROUP"
+    fi
+else
+    # Try to change to a group the user belongs to
+    USER_GROUPS=($(groups))
+    if [ ${#USER_GROUPS[@]} -gt 1 ]; then
+        ALT_GROUP=${USER_GROUPS[1]}
+        echo "Changing group of file2.txt to $ALT_GROUP (one of your groups):"
+        chgrp "$ALT_GROUP" file2.txt
+        ls -l file2.txt
+        echo ""
+        chgrp "$CURRENT_GROUP" file2.txt
+        echo "Changed group back to $CURRENT_GROUP"
+    else
+        echo "Using chgrp command (requires group you're member of):"
+        echo "  chgrp groupname file2.txt"
+    fi
+fi
+echo ""
+
+# Demonstrate how ownership affects file usage
+echo "Step 8: How ownership affects file usage"
+echo "Setting up demonstration:"
+
+# Create file with specific permissions
+echo "Creating test_file.txt with permissions 644:"
+echo "Test content" > test_file.txt
+chmod 644 test_file.txt
+ls -l test_file.txt
+echo ""
+
+echo "Current ownership:"
+stat -c "Owner: %U | Group: %G" test_file.txt
+echo ""
+
+# Test read permission
+echo "Testing read permission (as owner):"
+if [ -r test_file.txt ]; then
+    echo "✓ Can read: $(cat test_file.txt)"
+else
+    echo "✗ Cannot read"
+fi
+echo ""
+
+# Test write permission
+echo "Testing write permission (as owner):"
+if [ -w test_file.txt ]; then
+    echo "Appending to file..." >> test_file.txt
+    echo "✓ Can write to file"
+else
+    echo "✗ Cannot write to file"
+fi
+echo ""
+
+# Remove write permission and test
+echo "Removing write permission (chmod 444):"
+chmod 444 test_file.txt
+ls -l test_file.txt
+
+echo "Trying to write (as owner, but no write permission):"
+if [ -w test_file.txt ]; then
+    echo "This should not appear" >> test_file.txt 2>&1
+    echo "✓ Can write"
+else
+    echo "✗ Cannot write (expected - no write permission)"
+fi
+echo ""
+
+# Restore permissions
+chmod 644 test_file.txt
+
+# Demonstrate directory permissions
+echo "Step 9: Directory permissions demonstration"
+echo "Creating test_directory with permissions 755:"
+mkdir test_directory
+chmod 755 test_directory
+ls -ld test_directory
+echo ""
+
+echo "Testing directory access:"
+if [ -x test_directory ]; then
+    echo "✓ Can enter directory (execute permission on directory)"
+    cd test_directory
+    touch file_inside.txt
+    ls -la
+    cd ..
+else
+    echo "✗ Cannot enter directory"
+fi
+echo ""
+
+echo "Removing execute permission from directory (chmod 744):"
+chmod 744 test_directory
+ls -ld test_directory
+
+echo "Trying to access directory:"
+if [ -x test_directory ]; then
+    echo "✓ Can access"
+else
+    echo "✗ Cannot access directory (no execute permission = cannot cd into it)"
+fi
+echo ""
+
+# Using chown with owner:group syntax
+echo "Step 10: Using chown to change both owner and group"
+if [ "$EUID" -eq 0 ]; then
+    echo "Syntax: chown owner:group filename"
+    echo "Example: chown user1:group1 file.txt"
+    echo ""
+    echo "Alternative using chgrp:"
+    echo "  chown owner filename    # Change owner only"
+    echo "  chgrp group filename    # Change group only"
+    echo "  chown owner:group filename  # Change both"
+else
+    echo "chown command syntax:"
+    echo "  sudo chown owner filename           # Change owner"
+    echo "  sudo chown :group filename          # Change group only"
+    echo "  sudo chown owner:group filename     # Change both"
+    echo ""
+    echo "chgrp command syntax:"
+    echo "  chgrp groupname filename            # Change group (if you own file or are member of target group)"
+fi
+echo ""
+
+# Summary of commands
+echo "=== Summary of Commands ==="
+echo ""
+echo "Viewing permissions:"
+echo "  ls -l          # List files with permissions"
+echo "  ls -la         # Include hidden files"
+echo "  stat filename  # Detailed file information"
+echo ""
+echo "Changing permissions:"
+echo "  chmod 755 file.txt        # rwxr-xr-x"
+echo "  chmod u+x file.txt        # Add execute for owner"
+echo "  chmod g-w file.txt        # Remove write for group"
+echo "  chmod o+r file.txt        # Add read for others"
+echo ""
+echo "Changing ownership (requires root/sudo):"
+echo "  chown user file.txt                # Change owner"
+echo "  chown user:group file.txt          # Change owner and group"
+echo "  chown :group file.txt              # Change group only"
+echo "  chown -R user directory/           # Recursive (all files in directory)"
+echo ""
+echo "Changing group:"
+echo "  chgrp groupname file.txt           # Change group"
+echo "  chgrp -R groupname directory/      # Recursive"
+echo ""
+echo "Permission values:"
+echo "  4 = read (r)"
+echo "  2 = write (w)"
+echo "  1 = execute (x)"
+echo "  7 = read + write + execute (4+2+1)"
+echo "  6 = read + write (4+2)"
+echo "  5 = read + execute (4+1)"
+echo "  3 = write + execute (2+1)"
+echo ""
+
+# Cleanup
+echo "Cleaning up test files..."
+cd ..
+rm -rf test_permissions
+echo "✓ Cleanup complete"
+echo ""
+echo "=== Lab 6 demonstration complete ==="
+
